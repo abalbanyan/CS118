@@ -44,27 +44,41 @@ int main(int argc, char *argv[])
     listen(sockfd, 5);  // 5 simultaneous connection at most
 
     while (1) {
-        //accept connections
+        // Accept connections.
         newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
 
         if (newsockfd < 0)
         error("ERROR on accept");
 
         int n;
-        char buffer[256];
-
-        memset(buffer, 0, 256);  // reset memory
+        const int maxreqlen = 8192;
+        char request[maxreqlen]; // Maximum size of an HTTP GET request.
+        memset(request, 0, maxreqlen);  // reset memory
 
         // Read client's message.
-        n = read(newsockfd, buffer, 255);
+        n = read(newsockfd, request, maxreqlen);
         if (n < 0) 
             error("ERROR reading from socket");
-        
-        char* filename = "test.html";
+        fprintf(stdout, "%s", request);
+
+        // Process HTTP request.
+        char filename[4096]; // Maximum pathname length in Linux.
+        memset(filename, 0, 4096);
+        int filename_index = 0;
+        for (int i = 5; i < 4096; i++) {
+            if (request[i] != ' ') {
+                filename[filename_index++] = request[i];
+            } else {
+                break;
+            }
+        }
+        request[filename_index++] = '\0';
+
         FILE* file = fopen(filename, "r");
         if (!file) {
-            fprintf(stderr, "ERROR Opening file: %s", buffer);
-            error("");
+            fprintf(stderr, "ERROR 404: No such file exists: %s\n", filename);
+            close(newsockfd);
+            continue;
         }
 
         // Determine file length and include it in the HTTP response.
@@ -91,7 +105,6 @@ int main(int argc, char *argv[])
         if (count < 0) {
             error("ERROR sending file");
         }
-
 
         printf("Successfully sent file %s.", "test");
         // if (sendfile(newsockfd, fileno(file), NULL, 0) < 0) {

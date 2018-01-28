@@ -65,8 +65,12 @@ int main(int argc, char *argv[])
         char filename[4096]; // Maximum pathname length in Linux.
         memset(filename, 0, 4096);
         int filename_index = 0;
-        for (int i = 5; i < 4096; i++) {
-            if (request[i] != ' ') {
+        int i;
+        for (i = 5; i < 4096; i++) {
+            if (strncmp(&request[i], "%20", 3) == 0) { // Check for whitespace code in pathname (represented as %20).
+                filename[filename_index++] = ' ';
+                i += 2;
+            } else if (request[i] != ' ') {
                 filename[filename_index++] = request[i];
             } else {
                 break;

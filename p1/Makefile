@@ -6,7 +6,7 @@ CLASSES=
 all: server
 
 server: $(CLASSES)
-	$(CC) -o $@ $^ $(CPPFLAGS) $@.c
+	$(CC) -o $@ $^ $(CPPFLAGS) $@.c -lm
 
 clean:
 	rm -rf *.o *~ *.gch *.swp *.dSYM server *.tar.gz

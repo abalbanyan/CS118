@@ -1,8 +1,3 @@
-/* A simple server in the internet domain using TCP
-   The port number is passed as an argument
-   This version runs forever, forking off a separate
-   process for each connection
-*/
 #include <stdio.h>
 #include <sys/types.h>   // definitions of a number of data types used in socket.h and netinet/in.h
 #include <sys/socket.h>  // definitions of structures needed for sockets, e.g. sockaddr
@@ -13,9 +8,10 @@
 #include <signal.h>  /* signal name macros, and the kill() prototype */
 
 #include <sys/sendfile.h>
+#include <sys/stat.h>
+#include <math.h>
 
-void error(char *msg)
-{
+void error(char *msg) {
     perror(msg);
     exit(1);
 }
@@ -59,20 +55,31 @@ int main(int argc, char *argv[])
 
         memset(buffer, 0, 256);  // reset memory
 
-        //read client's message
+        // Read client's message.
         n = read(newsockfd, buffer, 255);
         if (n < 0) 
             error("ERROR reading from socket");
         
-        FILE* file = fopen("test", "r");
+        char* filename = "test.html";
+        FILE* file = fopen(filename, "r");
         if (!file) {
             fprintf(stderr, "ERROR Opening file: %s", buffer);
             error("");
         }
 
+        // Determine file length and include it in the HTTP response.
+        struct stat st;
+        stat(filename, &st);
+        int filesize = st.st_size;
+
+        int contentstrlength = (int) (20 + ((ceil(log10(filesize)) + 1) * sizeof(char)));
+        char* contentstr = malloc(contentstrlength * sizeof(char));
+        sprintf(contentstr, "Content-length: %d\n", filesize);
+
         // Send HTTP response.
         write(newsockfd, "HTTP/1.1 200 OK\n", 16);
-        write(newsockfd, "Content-length: 7\n", 19);
+        write(newsockfd, contentstr, contentstrlength);
+        fprintf(stderr, "%s", contentstr);
         write(newsockfd, "Content-Type: text/html\n\n", 25);
 
         int count;
@@ -84,6 +91,7 @@ int main(int argc, char *argv[])
         if (count < 0) {
             error("ERROR sending file");
         }
+
 
         printf("Successfully sent file %s.", "test");
         // if (sendfile(newsockfd, fileno(file), NULL, 0) < 0) {

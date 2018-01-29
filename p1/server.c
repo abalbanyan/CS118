@@ -96,9 +96,16 @@ int main(int argc, char *argv[])
         filename[filename_index++] = '\0';
         filetype[filetype_index++] = '\0';
  
+        // Open file.
         FILE* file = fopen(filename, "r");
         if (!file) {
-            fprintf(stderr, "ERROR 404: No such file exists: %s\n", filename);
+            // Send HTTP 404 response.
+            write(newsockfd, "HTTP/1.1 200 OK\n", 14);
+            write(newsockfd, "Content-length: 13\n", 19);
+            write(newsockfd, "Content-Type: text/html\n\n", 25);
+
+            write(newsockfd, "<b>404 Not Found</b>", 20);
+
             close(newsockfd);
             continue;
         }

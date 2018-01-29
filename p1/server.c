@@ -65,19 +65,37 @@ int main(int argc, char *argv[])
         char filename[4096]; // Maximum pathname length in Linux.
         memset(filename, 0, 4096);
         int filename_index = 0;
-        int i;
-        for (i = 5; i < 4096; i++) {
+
+        char filetype[5]; // .html, .htm, .jpeg, .gif, or .jpg
+        memset(filetype, 0, 5);
+        int filetype_index = 0;
+        int filetype_flag = 0; // Are we currently processing the file type?
+
+        // Generate filename + filetype.
+        int i = 5;
+        while (i < 4096) {
+            if (request[i] == ' ') {
+                break;
+            }
+
+            if (request[i] == '.') {
+                filetype_flag = 1;
+            } else if (filetype_flag) {
+                filetype[filetype_index++] = request[i];
+            }
+            
             if (strncmp(&request[i], "%20", 3) == 0) { // Check for whitespace code in pathname (represented as %20).
                 filename[filename_index++] = ' ';
                 i += 2;
-            } else if (request[i] != ' ') {
-                filename[filename_index++] = request[i];
             } else {
-                break;
+                filename[filename_index++] = request[i];
             }
-        }
-        request[filename_index++] = '\0';
 
+            i++;
+        }
+        filename[filename_index++] = '\0';
+        filetype[filetype_index++] = '\0';
+ 
         FILE* file = fopen(filename, "r");
         if (!file) {
             fprintf(stderr, "ERROR 404: No such file exists: %s\n", filename);
@@ -97,8 +115,17 @@ int main(int argc, char *argv[])
         // Send HTTP response.
         write(newsockfd, "HTTP/1.1 200 OK\n", 16);
         write(newsockfd, contentstr, contentstrlength);
-        fprintf(stderr, "%s", contentstr);
-        write(newsockfd, "Content-Type: text/html\n\n", 25);
+
+        // Send correct filetype.
+        if (!strcmp(filetype, "html") || !strcmp(filetype, "htm")) {
+            write(newsockfd, "Content-Type: text/html\n\n", 25);
+        } else if (!strcmp(filetype, "jpg") || (!strcmp(filetype, "jpeg"))) {
+            write(newsockfd, "Content-Type: image/jpeg\n\n", 26);
+        } else if (!strcmp(filetype, "gif")) {
+            write(newsockfd, "Content-Type: image/gif\n\n", 25);
+        } else { // Just fallback to HTML.
+            write(newsockfd, "Content-Type: text/html\n\n", 25);            
+        }
 
         int count;
         int filefd = fileno(file);
@@ -110,7 +137,7 @@ int main(int argc, char *argv[])
             error("ERROR sending file");
         }
 
-        printf("Successfully sent file %s.", "test");
+        fprintf(stderr, "Successfully sent file %s.", "test");
         // if (sendfile(newsockfd, fileno(file), NULL, 0) < 0) {
         //     error("ERROR sending file");
         // }

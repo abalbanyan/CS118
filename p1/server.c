@@ -66,8 +66,8 @@ int main(int argc, char *argv[])
         memset(filename, 0, 4096);
         int filename_index = 0;
 
-        char filetype[5]; // .html, .htm, .jpeg, .gif, or .jpg
-        memset(filetype, 0, 5);
+        char filetype[10]; // .html, .htm, .jpeg, .gif, or .jpg
+        memset(filetype, 0, 10);
         int filetype_index = 0;
         int filetype_flag = 0; // Are we currently processing the file type?
 
@@ -100,7 +100,7 @@ int main(int argc, char *argv[])
         FILE* file = fopen(filename, "r");
         if (!file) {
             // Send HTTP 404 response.
-            write(newsockfd, "HTTP/1.1 200 OK\n", 14);
+            write(newsockfd, "HTTP/1.1 404 Not Found\n", 14);
             write(newsockfd, "Content-length: 13\n", 19);
             write(newsockfd, "Content-Type: text/html\n\n", 25);
 
@@ -130,8 +130,8 @@ int main(int argc, char *argv[])
             write(newsockfd, "Content-Type: image/jpeg\n\n", 26);
         } else if (!strcmp(filetype, "gif")) {
             write(newsockfd, "Content-Type: image/gif\n\n", 25);
-        } else { // Just fallback to HTML.
-            write(newsockfd, "Content-Type: text/html\n\n", 25);            
+        } else { // Just fallback to octet-stream (for binary files typically).
+            write(newsockfd, "Content-Type: application/octet-stream\n\n", 40);
         }
 
         int count;
@@ -144,7 +144,7 @@ int main(int argc, char *argv[])
             error("ERROR sending file");
         }
 
-        fprintf(stderr, "Successfully sent file %s.", "test");
+        fprintf(stderr, "Successfully sent file %s\n", filename);
         // if (sendfile(newsockfd, fileno(file), NULL, 0) < 0) {
         //     error("ERROR sending file");
         // }

@@ -9,7 +9,6 @@ Server::Server(char* src_port) {
     }
 
     // Fill in address info.
-    struct sockaddr_in server_addr;
     memset((char*) &(this->serverinfo), 0, sizeof(this->serverinfo));
 
     this->serverinfo.sin_family = AF_INET;
@@ -35,7 +34,6 @@ Server::Server(char* src_port) {
         fprintf(stderr, "Error connecting to client.");
         exit(1);
     }
-    fprintf(stdout, "SYN received.\n");
     delete rcv_packet; rcv_packet = NULL;
 
     snd_packet = Packet(SYNACK);
@@ -43,13 +41,11 @@ Server::Server(char* src_port) {
         fprintf(stderr, "Error sending SYNACK to client.\n");
         exit(1);
     }
-    fprintf(stderr, "SYNACK sent.\n");
 
     if (this->receivePacket(rcv_packet) <= 0 || (rcv_packet->header).flags != ACK || rcv_packet->payload == NULL) {
         fprintf(stderr, "Error receiving ACK.\n");
         exit(1);
     }
-    fprintf(stdout, "ACK received. Client requested file: %s\n", rcv_packet->payload);
 
     // Connection has been established. Send requested file to client.
     if (this->sendFile((char*) rcv_packet->payload) <= 0) {
@@ -63,7 +59,6 @@ Server::Server(char* src_port) {
         fprintf(stderr, "Error sending FIN to client.\n");
         exit(1);
     }
-    fprintf(stdout, "FIN sent.\n");
 
     // Wait for FIN, ACK.
     bool fin_ackreceived = false;
@@ -77,17 +72,16 @@ Server::Server(char* src_port) {
         if (rcv_packet->header.flags & ACK) fin_ackreceived = true;
         delete rcv_packet;
     } while (!fin_ackreceived || !fin_finreceived);
-    fprintf(stdout, "Received FIN and ACK from client.\n");
 
     // Send acknowledgement of FIN. Close connection (TODO: After timed wait?).
     snd_packet = Packet(ACK);
     this->sendPacket(snd_packet);
-    fprintf(stdout, "Send ACK. Closing connection. Goodbye.\n");
+    fprintf(stdout, "Closing connection. Goodbye.\n");
     close(sockfd);
 }
 
 // Send a packet to the connected client. Returns bytes sent on success, 0 otherwise.
-int Server::sendPacket(Packet &packet) {
+int Server::sendPacket(Packet &packet, bool retransmission) {
     // Copy packet header into a buffer.
     uint8_t* packet_buffer = new uint8_t[HEADER_SIZE + packet.packet_size];
     memcpy(packet_buffer, &packet.header, HEADER_SIZE);
@@ -99,6 +93,10 @@ int Server::sendPacket(Packet &packet) {
 
     // Send the packet to the client.
     int bytessent = sendto(this->sockfd, packet_buffer, packet.packet_size, 0, (struct sockaddr*) &(this->clientinfo), sizeof(this->clientinfo));
+
+    // Print status message.
+    const char* type = (retransmission)? "Retransmission" : (packet.header.flags == SYN)? "SYN" : (packet.header.flags == FIN)? "FIN" : "";
+    fprintf(stdout, "Sending packet %d %d %s\n", packet.header.seqno, this->cwnd, type);
 
     delete packet_buffer;
     return (bytessent > 0) ? bytessent : 0;
@@ -128,6 +126,9 @@ int Server::receivePacket(Packet* &packet, bool blocking) {
     } else {
         packet = new Packet(header);
     }
+
+    // Print status message.
+    fprintf(stdout, "Receiving packet %d\n", packet->header.ackno);
 
     delete buffer;
     return bytesreceived;
@@ -167,7 +168,6 @@ int Server::sendFile(char* filename) {
 
     Packet* snd_packet;
     while (this->readFileChunk(snd_packet) > 0) {
-        fprintf(stdout, "Sending packet with sequence number: %d.\n", snd_packet->header.seqno);
         this->sendPacket(*snd_packet);
         delete snd_packet;
     }

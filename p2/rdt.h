@@ -103,7 +103,7 @@ public:
     Client(char* serverhostname, char* port, char* filename);
 
     // Send a packet to the server. Returns bytes sent on success, 0 otherwise.
-    int sendPacket(Packet &packet);
+    int sendPacket(Packet &packet, bool retransmission = false);
 
     // Wait for a packet from the server and store in buffer. Returns number of bytes read on success, 0 otherwise.
     int receivePacket(Packet* &packet, bool blocking = true);
@@ -134,7 +134,7 @@ public:
     Server(char* src_port);
 
     // Send a packet to the connected client. Returns bytes sent on success, 0 otherwise.
-    int sendPacket(Packet &packet);
+    int sendPacket(Packet &packet, bool retransmission = false);
 
     // Wait for a packet from a client and store in buffer. Returns number of bytes read on success, 0 otherwise.
     int receivePacket(Packet* &packet, bool blocking = true);

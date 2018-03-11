@@ -28,14 +28,11 @@ Client::Client(char* serverhostname, char* port, char* filename) {
         fprintf(stderr, "Error sending SYN. Error: %d\n", errno);
         exit(1);
     }
-    fprintf(stderr, "SYN sent.\n");
-
 
     if (this->receivePacket(rcv_packet) <= 0 || (rcv_packet->header).flags != SYNACK) {
         fprintf(stderr, "Error receiving SYNACK.\n");
         exit(1);
     }
-    fprintf(stderr, "SYNACK received.\n");
     delete rcv_packet;
 
     snd_packet = Packet(ACK, 0, 0, (uint8_t*) filename, strlen(filename) + 1);
@@ -43,30 +40,29 @@ Client::Client(char* serverhostname, char* port, char* filename) {
         fprintf(stderr, "Error sending ACK + filename.\n");
         exit(1);
     }
-    fprintf(stderr, "ACK + filename sent.\n");
 
     // Begin accepting requested file.
+    ofstream receivedfile("received.data");
     while (this->receivePacket(rcv_packet) > 0) {
         if (!(rcv_packet->header.flags & FIN)) {
             // Normal packet. TODO: Write to file.
-            fprintf(stdout, "Received packet with seqno %d and payload: %s\n", rcv_packet->header.seqno, rcv_packet->payload);
+            for (int i = 0; i < (rcv_packet->packet_size - HEADER_SIZE); i++) {
+                receivedfile << rcv_packet->payload[i];
+            }
             delete rcv_packet;
         } else {
             // Server is trying to close connection. Acknowledge the FIN.
-            fprintf(stdout, "Received FIN.\n");
             
             snd_packet = Packet(ACK);
             if (this->sendPacket(snd_packet) <= 0) {
                 fprintf(stderr, "Error closing connection (sending ACK).\n");
                 exit(1);
             }
-            fprintf(stdout, "Sent ACK.\n");
             snd_packet = Packet(FIN);
             if (this->sendPacket(snd_packet) <= 0) {
                 fprintf(stderr, "Error closing connection (sending FIN).\n");
                 exit(1);
             }
-            fprintf(stdout, "Sent FIN.\n");
             
             delete rcv_packet;
             do {
@@ -76,15 +72,15 @@ Client::Client(char* serverhostname, char* port, char* filename) {
                     exit(1);
                 }
             } while (rcv_packet->header.flags != ACK);
-            fprintf(stdout, "Received ACK. Closing connection. Goodbye.\n");
             close(sockfd);
-            exit(1);            
+            receivedfile.close();
+            exit(1);
         }
     }
 }
 
 // Prepares a packet to be sent.
-int Client::sendPacket(Packet &packet) {
+int Client::sendPacket(Packet &packet, bool retransmission) {
     // Copy packet header into a buffer.
     uint8_t* packet_buffer = new uint8_t[HEADER_SIZE + packet.packet_size];
     memcpy(packet_buffer, &(packet.header), HEADER_SIZE);
@@ -97,11 +93,15 @@ int Client::sendPacket(Packet &packet) {
     // Send the packet to the server.
     int bytessent = sendto(this->sockfd, packet_buffer, packet.packet_size, 0, (struct sockaddr*) &(this->serverinfo), sizeof(this->serverinfo));
 
+    // Print status message.
+    const char* type = (retransmission)? "Retransmission" : (packet.header.flags == SYN)? "SYN" : (packet.header.flags == FIN)? "FIN" : "";
+    fprintf(stdout, "Sending packet %d %s\n", packet.header.ackno, type);
+
     delete packet_buffer;
     return (bytessent > 0) ? bytessent : 0;
 }
 
-// Blocking operation!
+// Set blocking to false to make this a non-blocking operation.
 // Wait for a packet and store in buffer. Returns number of bytes read on success, 0 otherwise.
 int Client::receivePacket(Packet* &packet, bool blocking) {
     uint8_t* buffer = new uint8_t[MAX_PKT_SIZE];
@@ -125,6 +125,9 @@ int Client::receivePacket(Packet* &packet, bool blocking) {
     } else {
         packet = new Packet(header);
     }
+
+    // Print status message.
+    fprintf(stdout, "Receiving packet %d\n", packet->header.seqno);
 
     delete buffer;
     return bytesreceived;

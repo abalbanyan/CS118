@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdio.h>
+#include <sys/time.h>
 #include <sys/types.h>   // definitions of a number of data types used in socket.h and netinet/in.h
 #include <sys/socket.h>  // definitions of structures needed for sockets, e.g. sockaddr
 #include <netinet/in.h>  // constants and structures needed for internet domain addresses, e.g. sockaddr_in
@@ -12,6 +13,7 @@
 #include <vector>
 #include <set>
 #include <fstream>
+#include <ctime>
 #include <signal.h>
 
 using namespace std;
@@ -52,26 +54,41 @@ const int MAX_PKT_SIZE_SANS_HEADER = 1024 - HEADER_SIZE;
 // TCP Packet. Created with an optional payload (shallow copy!).
 class Packet {
 public:
-    uint8_t* payload;
+    uint8_t* payload = NULL;
     PacketHeader header;
     int packet_size; // header + payload, in bytes
+    struct timeval timeout; // Tracks when the packet was first added to window.
 
-    Packet(PacketHeader header, uint8_t* payload, int payload_size) {
+    // For reading.
+    Packet(PacketHeader header, uint8_t* payload = NULL, int payload_size = 0) {
         if (payload) {        
-            this->payload = payload;
+            this->payload = new uint8_t[payload_size]; 
+            memcpy(this->payload, payload, payload_size);
         }
         this->header = header;
         this->packet_size = HEADER_SIZE + payload_size;
+        gettimeofday(&(this->timeout), NULL);    
     }
-    Packet(int flag, int seqno = 0, int ackno = 0) {
+    // For sending.
+    Packet(int flag, int seqno = 0, int ackno = 0, uint8_t* payload = NULL, int payload_size = 0) {
         this->header.ackno = ackno;
         this->header.seqno = seqno;
         this->header.flags |= flag;
-        this->payload = NULL;
-        this->packet_size = HEADER_SIZE;
+
+        this->payload = new uint8_t[payload_size]; 
+        memcpy(this->payload, payload, payload_size);
+        
+        this->packet_size = payload_size + HEADER_SIZE;
+        gettimeofday(&(this->timeout), NULL);
     }
 
-    Packet() {}
+    Packet() {
+        if (this->payload != NULL) {
+            delete this->payload;
+        }
+    }
+
+//    ~Packet() { if (payload != NULL) delete this->payload; }
 };
 
 class Client {
@@ -83,13 +100,13 @@ public:
     uint16_t nextseqno; // The next expected seqno. Used to determine whether received a packet is missing or out of order.
 
     // Creates and binds a socket to the server at port port.
-    Client(char* serverhostname, char* port);
+    Client(char* serverhostname, char* port, char* filename);
 
     // Send a packet to the server. Returns bytes sent on success, 0 otherwise.
-    int sendPacket(Packet packet);
+    int sendPacket(Packet &packet);
 
     // Wait for a packet from the server and store in buffer. Returns number of bytes read on success, 0 otherwise.
-    int receivePacket(uint8_t* buffer, bool blocking);
+    int receivePacket(Packet* &packet, bool blocking = true);
 };
 
 class Server {
@@ -100,7 +117,7 @@ public:
 
     ifstream file; // File we are sending.
 
-    vector<Packet> packets; // Packets ready to be sent (limited to size of window).
+    vector<Packet> window; // Packets ready to be sent (limited to size of window).
     int cwnd = INITIAL_WINDOW/MAX_PKT_SIZE; // Number of packets allowed in current window.
     
     uint16_t baseseq; // The seqno of the oldest packet which has not been ACKed (bytes).
@@ -116,8 +133,8 @@ public:
     Server(char* src_port);
 
     // Send a packet to the connected client. Returns bytes sent on success, 0 otherwise.
-    int sendPacket(Packet packet);
+    int sendPacket(Packet &packet);
 
     // Wait for a packet from a client and store in buffer. Returns number of bytes read on success, 0 otherwise.
-    int receivePacket(uint8_t* buffer, bool blocking);
+    int receivePacket(Packet* &packet, bool blocking = true);
 };

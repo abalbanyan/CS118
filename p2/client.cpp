@@ -7,5 +7,5 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
-    Client* tcp_client = new Client(argv[1], argv[2]);
+    Client* tcp_client = new Client(argv[1], argv[2], argv[3]);
 }

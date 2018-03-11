@@ -4,8 +4,10 @@ USERID=304479543
 CLASSES=
 
 all: 
-	server client
-
+	rm server
+	rm client
+	make server
+	make client
 server:
 	$(CC) -o $@ $(CLASSES) $(CPPFLAGS) $@.cpp rdt_server.cpp
 

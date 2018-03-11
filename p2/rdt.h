@@ -49,7 +49,7 @@ struct PacketHeader {
 };
 
 const int HEADER_SIZE = sizeof(PacketHeader);
-const int MAX_PKT_SIZE_SANS_HEADER = 1024 - HEADER_SIZE;
+const int MAX_PKT_SIZE_SANS_HEADER = MAX_PKT_SIZE - HEADER_SIZE;
 
 // TCP Packet. Created with an optional payload (shallow copy!).
 class Packet {
@@ -116,6 +116,7 @@ public:
     struct sockaddr_in clientinfo, serverinfo; // Client initiates connection, so need to store clientinfo.
 
     ifstream file; // File we are sending.
+    ssize_t filesize;
 
     vector<Packet> window; // Packets ready to be sent (limited to size of window).
     int cwnd = INITIAL_WINDOW/MAX_PKT_SIZE; // Number of packets allowed in current window.
@@ -137,4 +138,10 @@ public:
 
     // Wait for a packet from a client and store in buffer. Returns number of bytes read on success, 0 otherwise.
     int receivePacket(Packet* &packet, bool blocking = true);
+
+    // Send file <filename> to connected client.
+    int sendFile(char* filename);
+
+    // Reads the next PACKET_SIZE_SAN_HEADER bytes from the currently open file into buffer. Returns the number of bytes read, or 0 on error.
+    int readFileChunk(Packet* &packet);
 };

@@ -36,7 +36,7 @@ Client::Client(char* serverhostname, char* port, char* filename) {
         exit(1);
     }
     fprintf(stderr, "SYNACK received.\n");
-    delete rcv_packet; rcv_packet = NULL;
+    delete rcv_packet;
 
     snd_packet = Packet(ACK, 0, 0, (uint8_t*) filename, strlen(filename) + 1);
     if (this->sendPacket(snd_packet) <= 0) {
@@ -44,6 +44,43 @@ Client::Client(char* serverhostname, char* port, char* filename) {
         exit(1);
     }
     fprintf(stderr, "ACK + filename sent.\n");
+
+    // Begin accepting requested file.
+    while (this->receivePacket(rcv_packet) > 0) {
+        if (!(rcv_packet->header.flags & FIN)) {
+            // Normal packet. TODO: Write to file.
+            fprintf(stdout, "Received packet with seqno %d and payload: %s\n", rcv_packet->header.seqno, rcv_packet->payload);
+            delete rcv_packet;
+        } else {
+            // Server is trying to close connection. Acknowledge the FIN.
+            fprintf(stdout, "Received FIN.\n");
+            
+            snd_packet = Packet(ACK);
+            if (this->sendPacket(snd_packet) <= 0) {
+                fprintf(stderr, "Error closing connection (sending ACK).\n");
+                exit(1);
+            }
+            fprintf(stdout, "Sent ACK.\n");
+            snd_packet = Packet(FIN);
+            if (this->sendPacket(snd_packet) <= 0) {
+                fprintf(stderr, "Error closing connection (sending FIN).\n");
+                exit(1);
+            }
+            fprintf(stdout, "Sent FIN.\n");
+            
+            delete rcv_packet;
+            do {
+                // TODO: Introduce timed wait.
+                if (this->receivePacket(rcv_packet) <= 0) {
+                    fprintf(stderr, "Error closing connection (receiving ACK).\n");
+                    exit(1);
+                }
+            } while (rcv_packet->header.flags != ACK);
+            fprintf(stdout, "Received ACK. Closing connection. Goodbye.\n");
+            close(sockfd);
+            exit(1);            
+        }
+    }
 }
 
 // Prepares a packet to be sent.

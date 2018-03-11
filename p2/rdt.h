@@ -22,7 +22,12 @@ using namespace std;
 const int MAX_PKT_SIZE = 1024; // Including headers.
 const int MAX_SEQNO = 30720;
 const int INITIAL_WINDOW = 5120; // Just the default.
-const int TIMEOUT = 500; // ms. Just the default.
+
+const struct timeval TIMEOUT = {
+    500,     /* tv_sec  */
+    500000 /* tv_usec */
+};
+const struct timeval NOTIMEOUT = {0,0};
 
 // TCP Header Flags
 const int FIN = 1;   // 0b00000001;
@@ -97,7 +102,7 @@ public:
     struct sockaddr_in serverinfo;
 
     set<uint16_t> received_packets; // Store a set of received packet seqnos, so that we can ignore duplicate packets.
-    uint16_t nextseqno; // The next expected seqno. Used to determine whether received a packet is missing or out of order.
+    uint16_t nextackno; // The next expected seqno. Used to determine whether received a packet is missing or out of order.
 
     // Creates and binds a socket to the server at port port.
     Client(char* serverhostname, char* port, char* filename);
@@ -106,7 +111,7 @@ public:
     int sendPacket(Packet &packet, bool retransmission = false);
 
     // Wait for a packet from the server and store in buffer. Returns number of bytes read on success, 0 otherwise.
-    int receivePacket(Packet* &packet, bool blocking = true);
+    int receivePacket(Packet* &packet, bool blocking = true, struct timeval timeout = NOTIMEOUT);
 };
 
 class Server {
@@ -121,13 +126,13 @@ public:
     vector<Packet> window; // Packets ready to be sent (limited to size of window).
     int cwnd = INITIAL_WINDOW/MAX_PKT_SIZE; // Number of packets allowed in current window.
     
-    uint16_t baseseq; // The seqno of the oldest packet which has not been ACKed (bytes).
+    uint16_t baseseqno; // The seqno of the oldest packet which has not been ACKed (bytes).
     int basepkt; // The index of the oldest packet which has not been ACKed.
 
-    uint16_t nextseq; // The seqno of the next sendable packet (bytes).
+    uint16_t nextseqno; // The seqno of the next sendable packet (bytes).
     int nextpkt; // The index of the next sendable packet.
 
-    uint16_t lastack; // The last ackno we have received. Remember SR uses cumulative ACKing, so baseseq should be set equal to lastack.
+    uint16_t lastackno; // The last ackno we have received. Remember SR uses cumulative ACKing, so baseseq should be set equal to lastack.
     int dupacks; // Counter for number of duplicate ACKs we have received (retransmit all unACKed packets on 3).
 
     // Creates and binds a socket at port src_port.
@@ -137,11 +142,11 @@ public:
     int sendPacket(Packet &packet, bool retransmission = false);
 
     // Wait for a packet from a client and store in buffer. Returns number of bytes read on success, 0 otherwise.
-    int receivePacket(Packet* &packet, bool blocking = true);
+    int receivePacket(Packet* &packet, bool blocking = true, struct timeval timeout = NOTIMEOUT);
 
     // Send file <filename> to connected client.
     int sendFile(char* filename);
 
     // Reads the next PACKET_SIZE_SAN_HEADER bytes from the currently open file into buffer. Returns the number of bytes read, or 0 on error.
-    int readFileChunk(Packet* &packet);
+    int sendFileChunk();
 };

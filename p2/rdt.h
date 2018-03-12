@@ -25,10 +25,13 @@ const int INITIAL_WINDOW = 5120; // Just the default.
 
 const int FAST_RETRANSMIT_THRESH = 3;
 const struct timeval TIMEOUT = {
-    0,     /* tv_sec  */
+    5000,     /* tv_sec  */
     500000 /* tv_usec */
 };
 const struct timeval NOTIMEOUT = {0,0};
+
+// TODO: Do we include header size when incrementing sequence number? Switch this to true if so.
+const bool INCHEADER = false;
 
 // TCP Header Flags
 const int FIN = 1;   // 0b00000001;
@@ -90,12 +93,25 @@ public:
         gettimeofday(&(this->timeout), NULL);
         timeradd(&TIMEOUT, &(this->timeout), &(this->timeout));
     }
-
-    Packet() {
-        if (this->payload != NULL) {
-            delete this->payload;
+    // Deep copy.
+    Packet(Packet* &packet) {
+        this->packet_size = packet->packet_size;
+        if (packet->payload != NULL) {
+            this->payload = new uint8_t[packet->packet_size - HEADER_SIZE];
+            memcpy(this->payload, payload, this->packet_size - HEADER_SIZE);
         }
+        this->header = packet->header;
+        this->acked = packet->acked;
+        this->timeout = packet->timeout;
     }
+
+    Packet() {}
+
+    // Packet() {
+    //     if (this->payload != NULL) {
+    //         delete this->payload;
+    //     }
+    // }
 
 //    ~Packet() { if (payload != NULL) delete this->payload; }
 };
@@ -105,8 +121,8 @@ public:
     int sockfd;
     struct sockaddr_in serverinfo;
 
-    set<uint16_t> received_packets; // Store a set of received packet seqnos, so that we can ignore duplicate packets.
-    vector<Packet> rcv_window; // Store received packets in a buffer.
+    set<uint16_t> received_packets; // Used to store seqnos received so we can track duplicates.
+    vector<Packet*> rcv_window; // Store received packets in a buffer.
     uint16_t rcv_base; // Base seqno in packet_buffer.
     
     uint16_t nextackno; // The next expected seqno. Used to determine whether received a packet is missing or out of order.
@@ -119,6 +135,8 @@ public:
 
     // Wait for a packet from the server and store in buffer. Returns number of bytes read on success, 0 otherwise.
     int receivePacket(Packet* &packet, bool blocking = true, struct timeval timeout = NOTIMEOUT);
+
+    void writePacketToFile(ofstream &file, Packet* &packet);
 };
 
 class Server {

@@ -40,14 +40,15 @@ Client::Client(char* serverhostname, char* port, char* filename) {
             fprintf(stderr, "Error: Expected SYNACK, received something else.\n");
             exit(1);
         }
-        if (receivestatus > 0)
+        if (receivestatus > 0) {
             filenameackno = (rcv_packet->header.seqno + 1) % MAX_SEQNO;
+        }
         delete rcv_packet;
     } while (receivestatus <= 0);
     
     fprintf(stdout, "Connected to server!\n");
     // Begin accepting requested file.
-    ofstream receivedfile("received.data");
+    ofstream outputfile("received.data");
 
     // Send ACK with filename.
     snd_packet = Packet(ACK, nextseqno, filenameackno, (uint8_t*) filename, strlen(filename) + 1);
@@ -65,6 +66,8 @@ Client::Client(char* serverhostname, char* port, char* filename) {
         }
     } while (receivestatus <= 0);
 
+    this->rcv_base = filenameackno;
+
     // Accept the rest of the file.
     while(1) {
         if (rcv_packet == NULL) {
@@ -73,13 +76,33 @@ Client::Client(char* serverhostname, char* port, char* filename) {
         if (!(rcv_packet->header.flags & FIN)) {
             // Normal packet.
             if (this->received_packets.find(rcv_packet->header.seqno) == this->received_packets.end()) {
-                // Write to file. TODO: Out of order packets?
-                for (int i = 0; i < (rcv_packet->packet_size - HEADER_SIZE); i++) {
-                    receivedfile << rcv_packet->payload[i];
+                // This block of code is here to write out-of-order packets in the correct order to file.
+                if (rcv_packet->header.seqno != this->rcv_base) {
+                    this->rcv_window.push_back(new Packet(rcv_packet)); // Add to buffer.
+                } else {
+                    // Write packet to file immediately and update rcv_base.
+                    writePacketToFile(outputfile, rcv_packet);
+                    this->rcv_base = (this->rcv_base + rcv_packet->packet_size - (INCHEADER? 0 : HEADER_SIZE)) % MAX_SEQNO;
+
+                    // Write all previously buffered and consecutively numbered (beginning with rcv_base) packets.
+                    bool removed_one = false;
+                    do {
+                        for (vector<Packet*>::iterator it = this->rcv_window.begin(); it != this->rcv_window.end();) {
+                            if ((*it)->header.seqno == this->rcv_base) {
+                                writePacketToFile(outputfile, *it);
+                                this->rcv_base = (this->rcv_base + (*it)->packet_size - (INCHEADER? 0 : HEADER_SIZE)) % MAX_SEQNO;
+                                delete *it;
+                                this->rcv_window.erase(it);
+                                removed_one = true;
+                            } else {
+                                ++it;
+                            }
+                        }
+                    } while (removed_one);
                 }
                 this->received_packets.insert(rcv_packet->header.seqno);
             }
-            // ACK packet. 
+            // ACK the received packet. 
             Packet ack = Packet(ACK, 0, rcv_packet->header.seqno);
             this->sendPacket(ack);
 
@@ -97,7 +120,7 @@ Client::Client(char* serverhostname, char* port, char* filename) {
             this->receivePacket(rcv_packet, true, TIMEOUT); // Can just time out.
 
             if (rcv_packet != NULL) delete rcv_packet;
-            receivedfile.close();
+            outputfile.close();
             close(sockfd);
             exit(0);
         }
@@ -173,4 +196,10 @@ int Client::receivePacket(Packet* &packet, bool blocking, struct timeval timeout
 
     delete buffer;
     return bytesreceived;
+}
+
+void Client::writePacketToFile(ofstream &file, Packet* &packet) {
+    for (int i = 0; i < (packet->packet_size - HEADER_SIZE); i++) {
+        file << packet->payload[i];
+    }
 }

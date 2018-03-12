@@ -189,7 +189,7 @@ bool Server::sendFileChunk() {
     }
     this->window.push_back(packet);
 
-    this->nextseqno = (this->nextseqno + bytestoread) % MAX_SEQNO;
+    this->nextseqno = (this->nextseqno + bytestoread + (INCHEADER? HEADER_SIZE : 0)) % MAX_SEQNO;
 
     return done_reading;
 }

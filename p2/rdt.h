@@ -23,8 +23,9 @@ const int MAX_PKT_SIZE = 1024; // Including headers.
 const int MAX_SEQNO = 30720;
 const int INITIAL_WINDOW = 5120; // Just the default.
 
+const int FAST_RETRANSMIT_THRESH = 3;
 const struct timeval TIMEOUT = {
-    500,     /* tv_sec  */
+    5000,     /* tv_sec  */
     500000 /* tv_usec */
 };
 const struct timeval NOTIMEOUT = {0,0};
@@ -72,7 +73,8 @@ public:
         }
         this->header = header;
         this->packet_size = HEADER_SIZE + payload_size;
-        gettimeofday(&(this->timeout), NULL);    
+        gettimeofday(&(this->timeout), NULL);
+        timeradd(&TIMEOUT, &(this->timeout), &(this->timeout));
     }
     // For sending.
     Packet(int flag, int seqno = 0, int ackno = 0, uint8_t* payload = NULL, int payload_size = 0) {
@@ -85,6 +87,7 @@ public:
         
         this->packet_size = payload_size + HEADER_SIZE;
         gettimeofday(&(this->timeout), NULL);
+        timeradd(&TIMEOUT, &(this->timeout), &(this->timeout));
     }
 
     Packet() {
@@ -123,17 +126,15 @@ public:
     ifstream file; // File we are sending.
     ssize_t filesize;
 
-    vector<Packet> window; // Packets ready to be sent (limited to size of window).
-    int cwnd = INITIAL_WINDOW/MAX_PKT_SIZE; // Number of packets allowed in current window.
-    
+    vector<Packet*> window; // Packets ready to be sent (limited to size of window).
+    uint16_t cwnd = INITIAL_WINDOW/MAX_PKT_SIZE; // Number of packets allowed in current window.
     uint16_t baseseqno; // The seqno of the oldest packet which has not been ACKed (bytes).
-    int basepkt; // The index of the oldest packet which has not been ACKed.
-
     uint16_t nextseqno; // The seqno of the next sendable packet (bytes).
-    int nextpkt; // The index of the next sendable packet.
-
     uint16_t lastackno; // The last ackno we have received. Remember SR uses cumulative ACKing, so baseseq should be set equal to lastack.
     int dupacks; // Counter for number of duplicate ACKs we have received (retransmit all unACKed packets on 3).
+
+    bool filename_acked = false; // Has the filename been ACKed yet?
+    int filename_ackno; // ackno of filename ACK.
 
     // Creates and binds a socket at port src_port.
     Server(char* src_port);
@@ -148,5 +149,5 @@ public:
     int sendFile(char* filename);
 
     // Reads the next PACKET_SIZE_SAN_HEADER bytes from the currently open file into buffer. Returns the number of bytes read, or 0 on error.
-    int sendFileChunk();
+    bool sendFileChunk();
 };

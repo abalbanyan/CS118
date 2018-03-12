@@ -44,34 +44,53 @@ Client::Client(char* serverhostname, char* port, char* filename) {
         delete rcv_packet;
     } while (receivestatus <= 0);
     
-    // Send ACK with filename.
+    fprintf(stdout, "Connected to server!\n");
+    // Begin accepting requested file.
+    ofstream receivedfile("received.data");
 
-    snd_packet = Packet(ACK, 0, this->nextackno, (uint8_t*) filename, strlen(filename) + 1);
+    // Send ACK with filename.
+    snd_packet = Packet(ACK, nextseqno, this->nextackno, (uint8_t*) filename, strlen(filename) + 1);
     do {
         this->sendPacket(snd_packet);
-        // Wait for ACK.
+        // Wait for first chunk (which also contains filename ACK).
         receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT);
-        if (receivestatus <= 0 || rcv_packet->payload == NULL) {
+        if (receivestatus <= 0) {
             delete rcv_packet;
+        } else if (rcv_packet->header.flags & ACK) {
+            break; // Start accepting the rest of the file.
+        } else {
+            fprintf(stderr, "Error receiving ACK for filename.\n");
+            exit(1);
         }
     } while (receivestatus <= 0);
 
-    // Begin accepting requested file.
-    ofstream receivedfile("received.data");
+    // Accept the rest of the file.
     while(1) {
         if (rcv_packet == NULL) {
-            this->receivePacket(rcv_packet);
+            receivestatus = this->receivePacket(rcv_packet);
         }
         if (!(rcv_packet->header.flags & FIN)) {
-
             // Normal packet.
-            for (int i = 0; i < (rcv_packet->packet_size - HEADER_SIZE); i++) {
-                receivedfile << rcv_packet->payload[i];
+            // Make sure this is not a duplicate packet.
+            if (this->received_packets.find(rcv_packet->header.seqno) == this->received_packets.end()) {
+                // Write to file. TODO: Out of order packets?
+                for (int i = 0; i < (rcv_packet->packet_size - HEADER_SIZE); i++) {
+                    receivedfile << rcv_packet->payload[i];
+                }
+                this->received_packets.insert(rcv_packet->header.seqno);
             }
+            // Send ACK. If a packet is missing, then resend old ackno.
+            if (rcv_packet->header.seqno == this->nextackno) {
+                this->nextackno = (receivestatus - HEADER_SIZE + rcv_packet->header.seqno);
+            }
+            Packet ack = Packet(ACK, 0, this->nextackno);
+            this->sendPacket(ack);
+
             delete rcv_packet; rcv_packet = NULL;
 
         } else {            
             // Server is trying to close connection. Acknowledge the FIN.
+            // TODO: Fix this if we need to include payload in the FIN.
 
             snd_packet = Packet(ACK);
             this->sendPacket(snd_packet);

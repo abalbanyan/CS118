@@ -52,6 +52,9 @@ Server::Server(char* src_port) {
         fprintf(stderr, "Error receiving ACK. No filename included or not ACK.\n");
         exit(1);
     }
+    this->filename_ackno = (strlen((char*) rcv_packet->payload) + snd_packet.header.seqno);
+
+    fprintf(stdout, "Connected to client!\n");
 
     // Connection has been established. Send requested file to client.
     if (this->sendFile((char*) rcv_packet->payload) <= 0) {
@@ -60,6 +63,9 @@ Server::Server(char* src_port) {
     }
     delete rcv_packet;
 
+    // TODO: Not sure if we're supposed to send a FIN here or in sendFileChunk when the last chunk is sent.
+    snd_packet = Packet(FIN, this->nextseqno);
+    this->sendPacket(snd_packet);
     // Finished sending file. Wait for FINACK then close connection (we close anyway if it takes too long).
     bool fin_ackreceived = false;
     bool fin_finreceived = false;
@@ -101,6 +107,10 @@ int Server::sendPacket(Packet &packet, bool retransmission) {
         fprintf(stderr, "Error sending packet with seqno %d. Exiting.\n", packet.header.seqno);
         exit(1);
     }
+
+    // Reset timeout on packet.
+    gettimeofday(&(packet.timeout), NULL);
+    timeradd(&TIMEOUT, &(packet.timeout), &(packet.timeout));
 
     // Print status message.
     const char* type = (retransmission)? "Retransmission" : (packet.header.flags & SYN)? "SYN" : (packet.header.flags & FIN)? "FIN" : "";
@@ -150,30 +160,38 @@ int Server::receivePacket(Packet* &packet, bool blocking, struct timeval timeout
     return bytesreceived;
 }
 
-// Reads the next MAX_PKT_SIZE_SANS_HEADER bytes from the open file, then creates a packet with the data read from the file.
-// Returns FIN when completed.
-int Server::sendFileChunk() {
+// Reads the next MAX_PKT_SIZE_SANS_HEADER bytes from the open file, then
+// creates a packet with the data read from the file, and sends it.
+// Returns true when done reading file.
+bool Server::sendFileChunk() {
     // Allocate space for buffer.
     uint8_t* buffer = new uint8_t[MAX_PKT_SIZE_SANS_HEADER];
     memset(buffer, '\0', MAX_PKT_SIZE_SANS_HEADER);
 
+    bool done_reading = false;
     ssize_t bytestoread = this->filesize - this->file.tellg();
-    int flag = 0;
+    int flag = (this->filename_acked)? 0 : ACK;
+    int ackno = (this->filename_acked)? 0 : this->filename_ackno;
+
     if (bytestoread > MAX_PKT_SIZE_SANS_HEADER) {
         bytestoread = MAX_PKT_SIZE_SANS_HEADER;
     } else {
-        flag = FIN; // We've come to the last chunk of the file. Send a FIN.
+        done_reading = true;
+        // TODO: Not sure if we're supposed to send FIN with final packet of file or not. Ask TA.
+        // flag = FIN; // We've come to the last chunk of the file. Send a FIN.
     }
 
     this->file.read((char*) buffer, bytestoread);
-    Packet* packet = new Packet(flag, this->nextseqno, 0, buffer, bytestoread);
-    this->sendPacket(*packet);
+    Packet* packet = new Packet(flag, this->nextseqno, ackno, buffer, bytestoread);
+    this->sendPacket(*packet); // Send as soon as it is made available.
+    this->window.push_back(packet);
 
     this->nextseqno = (this->nextseqno + bytestoread) % MAX_SEQNO;
-    
-    return flag;
+
+    return done_reading;
 }
 
+// Reliable data transfer. Contains event loop.
 int Server::sendFile(char* filename) {
     // Open specified file.
     this->file.open(filename, ios::in | ios::binary);
@@ -182,12 +200,78 @@ int Server::sendFile(char* filename) {
         exit(1);
     }
 
-    // Determine filesize;
+    // Determine filesize.
     this->file.seekg(0, this->file.end);
     this->filesize = this->file.tellg();
     this->file.seekg(0, this->file.beg);
 
     // Begin sending file packet by packet. Send FIN when done.
-    while (!this->sendFileChunk());
+    bool done_reading = false;
+    struct timeval current_time;
+    struct timeval closest_timeout;
+    struct timeval packet_timeout;
+    struct timeval double_timeout;
+    timeradd(&TIMEOUT, &TIMEOUT, &double_timeout);
+    Packet* closest_packet;
+    Packet* rcv_packet = NULL;
+    // Event loop.
+    // Each loop, window is filled, and either one packet is received, or a timeout occurs.
+    while (1) {
+        // Fill cwnd.
+        while (!done_reading && this->window.size() < this->cwnd) {
+            done_reading = (done_reading)? done_reading : this->sendFileChunk();
+        }
+
+        // Find closest timeout time.
+        gettimeofday(&current_time, NULL);
+        closest_timeout = double_timeout;
+        for (Packet* packet : this->window) {
+            timersub(&(packet->timeout), &current_time, &packet_timeout);
+            if (timercmp(&packet_timeout, &closest_timeout, <)) {
+                closest_timeout = packet_timeout;
+                closest_packet = packet;
+            }
+        }
+
+        // Wait for an ACK, or a timeout. Retransmit on timeout.
+        if (!this->window.empty()) {
+            if (this->receivePacket(rcv_packet, true, closest_timeout) == -1) {
+                // Timeout occured. Retransmit the packet.
+                this->sendPacket(*closest_packet, true);
+            } else {
+                this->filename_acked = true;
+                if (this->lastackno != rcv_packet->header.ackno) {
+                    // ACK received. ACK all packets with seqno < ackno of received ACK.
+                    // TODO: Verify that SR is a cumulative ACKing protocol.
+                    this->lastackno = rcv_packet->header.ackno;
+                    this->dupacks = 0;
+
+                    for (vector<Packet*>::iterator it = this->window.begin(); it != this->window.end();) {
+                        if ((*it)->header.seqno < rcv_packet->header.ackno) {
+                            delete *it;
+                            this->window.erase(it);
+                        } else {
+                            ++it;
+                        }
+                    }
+                } else {
+                    // Duplicate ack.
+                    this->dupacks++;
+                    if (this->dupacks == FAST_RETRANSMIT_THRESH) {
+                        fprintf(stderr, "Fast retransmit!\n");
+                        // Fast retransmit. Retransmit all packets in window.
+                        for (Packet* packet : this->window) {
+                            this->sendPacket(*packet);
+                        }
+                    }
+                    this->dupacks = 0;
+                }
+            }
+        } else if (done_reading) {
+            break; // Done transmitting file.
+        } else {
+            fprintf(stderr, "Shouldn't be here.");
+        }
+    }
     return 1;
 }

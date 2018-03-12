@@ -52,7 +52,7 @@ Server::Server(char* src_port) {
         fprintf(stderr, "Error receiving ACK. No filename included or not ACK.\n");
         exit(1);
     }
-    this->filename_ackno = (strlen((char*) rcv_packet->payload) + snd_packet.header.seqno);
+    this->filename_ackno = snd_packet.header.seqno;
 
     fprintf(stdout, "Connected to client!\n");
 
@@ -184,6 +184,9 @@ bool Server::sendFileChunk() {
     this->file.read((char*) buffer, bytestoread);
     Packet* packet = new Packet(flag, this->nextseqno, ackno, buffer, bytestoread);
     this->sendPacket(*packet); // Send as soon as it is made available.
+    if (this->window.empty()) {
+        this->baseseqno = packet->header.seqno;
+    }
     this->window.push_back(packet);
 
     this->nextseqno = (this->nextseqno + bytestoread) % MAX_SEQNO;
@@ -239,33 +242,26 @@ int Server::sendFile(char* filename) {
                 // Timeout occured. Retransmit the packet.
                 this->sendPacket(*closest_packet, true);
             } else {
-                this->filename_acked = true;
-                if (this->lastackno != rcv_packet->header.ackno) {
-                    // ACK received. ACK all packets with seqno < ackno of received ACK.
-                    // TODO: Verify that SR is a cumulative ACKing protocol.
-                    this->lastackno = rcv_packet->header.ackno;
-                    this->dupacks = 0;
-
+                // ACK received.
+                // Mark appropriate packet as ACKed.
+                for (Packet* packet : this->window) {
+                    if (packet->header.seqno == rcv_packet->header.ackno) {
+                        packet->acked = true;
+                    }
+                }
+                // If ACKno == baseseqno, delete all ACKed packets from beginning of window to first unACKed packet, and update baseseqno.
+                if (this->baseseqno == rcv_packet->header.ackno) {
                     for (vector<Packet*>::iterator it = this->window.begin(); it != this->window.end();) {
-                        if ((*it)->header.seqno < rcv_packet->header.ackno) {
+                        if ((*it)->acked) {
                             delete *it;
                             this->window.erase(it);
                         } else {
-                            ++it;
+                            this->baseseqno = (*it)->header.seqno;
+                            break;
                         }
                     }
-                } else {
-                    // Duplicate ack.
-                    this->dupacks++;
-                    if (this->dupacks == FAST_RETRANSMIT_THRESH) {
-                        fprintf(stderr, "Fast retransmit!\n");
-                        // Fast retransmit. Retransmit all packets in window.
-                        for (Packet* packet : this->window) {
-                            this->sendPacket(*packet);
-                        }
-                    }
-                    this->dupacks = 0;
                 }
+                this->filename_acked = true;
             }
         } else if (done_reading) {
             break; // Done transmitting file.

@@ -24,6 +24,7 @@ Client::Client(char* serverhostname, char* port, char* filename) {
     Packet* rcv_packet = NULL;
     int receivestatus;
     uint16_t nextseqno;
+    uint16_t filenameackno;
 
     // Send SYN with initial seqno.
     srand(time(NULL));
@@ -40,7 +41,7 @@ Client::Client(char* serverhostname, char* port, char* filename) {
             exit(1);
         }
         if (receivestatus > 0)
-            this->nextackno = (rcv_packet->header.seqno + 1) % MAX_SEQNO;
+            filenameackno = (rcv_packet->header.seqno + 1) % MAX_SEQNO;
         delete rcv_packet;
     } while (receivestatus <= 0);
     
@@ -49,7 +50,7 @@ Client::Client(char* serverhostname, char* port, char* filename) {
     ofstream receivedfile("received.data");
 
     // Send ACK with filename.
-    snd_packet = Packet(ACK, nextseqno, this->nextackno, (uint8_t*) filename, strlen(filename) + 1);
+    snd_packet = Packet(ACK, nextseqno, filenameackno, (uint8_t*) filename, strlen(filename) + 1);
     do {
         this->sendPacket(snd_packet);
         // Wait for first chunk (which also contains filename ACK).
@@ -71,7 +72,6 @@ Client::Client(char* serverhostname, char* port, char* filename) {
         }
         if (!(rcv_packet->header.flags & FIN)) {
             // Normal packet.
-            // Make sure this is not a duplicate packet.
             if (this->received_packets.find(rcv_packet->header.seqno) == this->received_packets.end()) {
                 // Write to file. TODO: Out of order packets?
                 for (int i = 0; i < (rcv_packet->packet_size - HEADER_SIZE); i++) {
@@ -79,11 +79,8 @@ Client::Client(char* serverhostname, char* port, char* filename) {
                 }
                 this->received_packets.insert(rcv_packet->header.seqno);
             }
-            // Send ACK. If a packet is missing, then resend old ackno.
-            if (rcv_packet->header.seqno == this->nextackno) {
-                this->nextackno = (receivestatus - HEADER_SIZE + rcv_packet->header.seqno);
-            }
-            Packet ack = Packet(ACK, 0, this->nextackno);
+            // ACK packet. 
+            Packet ack = Packet(ACK, 0, rcv_packet->header.seqno);
             this->sendPacket(ack);
 
             delete rcv_packet; rcv_packet = NULL;

@@ -25,7 +25,7 @@ const int INITIAL_WINDOW = 5120; // Just the default.
 
 const int FAST_RETRANSMIT_THRESH = 3;
 const struct timeval TIMEOUT = {
-    5000,     /* tv_sec  */
+    0,     /* tv_sec  */
     500000 /* tv_usec */
 };
 const struct timeval NOTIMEOUT = {0,0};
@@ -63,6 +63,7 @@ public:
     uint8_t* payload = NULL;
     PacketHeader header;
     int packet_size; // header + payload, in bytes
+    bool acked = false;
     struct timeval timeout; // Tracks when the packet was first added to window.
 
     // For reading.
@@ -105,6 +106,9 @@ public:
     struct sockaddr_in serverinfo;
 
     set<uint16_t> received_packets; // Store a set of received packet seqnos, so that we can ignore duplicate packets.
+    vector<Packet> rcv_window; // Store received packets in a buffer.
+    uint16_t rcv_base; // Base seqno in packet_buffer.
+    
     uint16_t nextackno; // The next expected seqno. Used to determine whether received a packet is missing or out of order.
 
     // Creates and binds a socket to the server at port port.

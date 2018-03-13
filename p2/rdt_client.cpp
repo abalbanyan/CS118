@@ -31,8 +31,7 @@ Client::Client(char* serverhostname, char* port, char* filename) {
     snd_packet = Packet(SYN, nextseqno, 0);
 
     do {
-        if (rcv_packet != NULL)
-            delete rcv_packet;
+        delete rcv_packet; rcv_packet = NULL;
         this->sendPacket(snd_packet); // Send SYN.
         receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT); // Wait for SYNACK.
     } while (receivestatus <= 0 || (rcv_packet->header).flags != SYNACK || rcv_packet->header.ackno != snd_packet.header.seqno);
@@ -43,7 +42,7 @@ Client::Client(char* serverhostname, char* port, char* filename) {
     snd_packet = Packet(ACK, filenameseqno, rcv_packet->header.seqno, (uint8_t*) filename, strlen(filename) + 1);
     this->rcv_base = (rcv_packet->header.seqno + 1) % MAX_SEQNO;
     do {
-        delete rcv_packet;
+        delete rcv_packet; rcv_packet = NULL;
         this->sendPacket(snd_packet); // Send the ACK with filename.
         receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT); // Wait for first ACK of filename.
     } while (receivestatus <= 0 || rcv_packet->header.flags != ACK || rcv_packet->header.ackno != filenameseqno);
@@ -53,12 +52,13 @@ Client::Client(char* serverhostname, char* port, char* filename) {
     // Accept the rest of the file.
     while(1) {
         if (rcv_packet == NULL) {
-            receivestatus = this->receivePacket(rcv_packet);
-        }
-        if (!(rcv_packet->header.flags & FIN)) {
+            fprintf(stderr, "============PACKET NULL!============\n");
+            receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT);
+        } else if (!(rcv_packet->header.flags & FIN)) {
             // Normal packet.
             if (this->received_packets.find(rcv_packet->header.seqno) == this->received_packets.end()) {
                 // This block of code is here to write out-of-order packets in the correct order to file.
+                // TODO: There is probably a bug here - corruption in received file sometimes when packet loss is on.
                 if (rcv_packet->header.seqno != this->rcv_base) {
                     this->rcv_window.push_back(new Packet(rcv_packet)); // Add to buffer.
                 } else {
@@ -67,8 +67,9 @@ Client::Client(char* serverhostname, char* port, char* filename) {
                     this->rcv_base = (this->rcv_base + rcv_packet->packet_size - (INCHEADER? 0 : HEADER_SIZE)) % MAX_SEQNO;
 
                     // Write all previously buffered and consecutively numbered (beginning with rcv_base) packets.
-                    bool removed_one = false;
+                    bool removed_one;
                     do {
+                        removed_one = false;
                         for (vector<Packet*>::iterator it = this->rcv_window.begin(); it != this->rcv_window.end();) {
                             if ((*it)->header.seqno == this->rcv_base) {
                                 writePacketToFile(outputfile, *it);
@@ -91,9 +92,10 @@ Client::Client(char* serverhostname, char* port, char* filename) {
 
             delete rcv_packet; rcv_packet = NULL;
 
-        } else {            
+        } else {
             // Server is trying to close connection. Acknowledge the FIN.
             // TODO: Fix this if we need to include payload in the FIN.
+            // TODO: This seems to freeze sometimes...
 
             snd_packet = Packet(ACK);
             this->sendPacket(snd_packet);
@@ -102,7 +104,7 @@ Client::Client(char* serverhostname, char* port, char* filename) {
             
             this->receivePacket(rcv_packet, true, TIMEOUT); // Can just time out.
 
-            if (rcv_packet != NULL) delete rcv_packet;
+            delete rcv_packet; rcv_packet = NULL;
             outputfile.close();
             close(sockfd);
             exit(0);
@@ -154,6 +156,7 @@ int Client::receivePacket(Packet* &packet, bool blocking, struct timeval timeout
     // Error occured (possibly a timeout).
     if (bytesreceived <= 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            // TODO: Set packet to NULL?
             return -1; // Timeout occured.
         } else {
             // Some other error occured.

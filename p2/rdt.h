@@ -67,7 +67,7 @@ public:
     PacketHeader header;
     int packet_size; // header + payload, in bytes
     bool acked = false;
-    struct timeval timeout; // Tracks when the packet was first added to window.
+    struct timeval timeout_time; // Timestamp of when a packet will timeout. Updated whenever a packet is sent/resent.
 
     // For reading.
     Packet(PacketHeader header, uint8_t* payload = NULL, int payload_size = 0) {
@@ -77,8 +77,8 @@ public:
         }
         this->header = header;
         this->packet_size = HEADER_SIZE + payload_size;
-        gettimeofday(&(this->timeout), NULL);
-        timeradd(&TIMEOUT, &(this->timeout), &(this->timeout));
+        // gettimeofday(&(this->timeout), NULL);
+        // timeradd(&TIMEOUT, &(this->timeout), &(this->timeout));
     }
     // For sending.
     Packet(int flag, int seqno = 0, int ackno = 0, uint8_t* payload = NULL, int payload_size = 0) {
@@ -90,8 +90,8 @@ public:
         memcpy(this->payload, payload, payload_size);
         
         this->packet_size = payload_size + HEADER_SIZE;
-        gettimeofday(&(this->timeout), NULL);
-        timeradd(&TIMEOUT, &(this->timeout), &(this->timeout));
+        // gettimeofday(&(this->timeout), NULL);
+        // timeradd(&TIMEOUT, &(this->timeout), &(this->timeout));
     }
     // Deep copy.
     Packet(Packet* &packet) {
@@ -102,10 +102,10 @@ public:
         }
         this->header = packet->header;
         this->acked = packet->acked;
-        this->timeout = packet->timeout;
+        this->timeout_time = packet->timeout_time;
 
-        gettimeofday(&(this->timeout), NULL);
-        timeradd(&TIMEOUT, &(this->timeout), &(this->timeout));
+        // gettimeofday(&(this->timeout), NULL);
+        // timeradd(&TIMEOUT, &(this->timeout), &(this->timeout));
     }
 
     Packet() {}

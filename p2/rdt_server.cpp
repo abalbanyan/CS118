@@ -41,7 +41,7 @@ Server::Server(char* src_port) {
     snd_packet = Packet(SYNACK, this->nextseqno, rcv_packet->header.seqno);
     this->nextseqno = (this->nextseqno + 1) % MAX_SEQNO;
     do {
-        delete rcv_packet;
+        delete rcv_packet; rcv_packet = NULL;
         this->sendPacket(snd_packet);
         receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT);
     } while (receivestatus <= 0 || (rcv_packet->header).flags != ACK || rcv_packet->header.ackno != snd_packet.header.seqno);
@@ -58,7 +58,7 @@ Server::Server(char* src_port) {
         fprintf(stderr, "Error sending file to client.\n");
         exit(1);
     }
-    delete rcv_packet;
+    delete rcv_packet; rcv_packet = NULL;
 
     // TODO: Not sure if we're supposed to send a FIN here or in sendFileChunk when the last chunk is sent.
     snd_packet = Packet(FIN, this->nextseqno);
@@ -72,7 +72,7 @@ Server::Server(char* src_port) {
             fin_finreceived = true;
         if (receivestatus > 0 && rcv_packet->header.flags & ACK)
             fin_ackreceived = true;
-        delete rcv_packet;
+        delete rcv_packet; rcv_packet = NULL;
     } while (receivestatus > 0 && ( !fin_ackreceived || !fin_finreceived ));
 
     // Send acknowledgement of FIN (if we didn't just timeout).
@@ -108,7 +108,7 @@ int Server::sendPacket(Packet &packet, bool retransmission) {
     // Reset timeout on packet.
     struct timeval timeofday;
     gettimeofday(&timeofday, NULL);
-    timeradd(&TIMEOUT, &timeofday, &(packet.timeout));
+    timeradd(&TIMEOUT, &timeofday, &(packet.timeout_time));
 
     // Print status message.
     const char* type = (retransmission)? "Retransmission" : (packet.header.flags & SYN)? "SYN" : (packet.header.flags & FIN)? "FIN" : "";
@@ -131,6 +131,7 @@ int Server::receivePacket(Packet* &packet, bool blocking, struct timeval timeout
     // Error occured (possibly a timeout).
     if (bytesreceived <= 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            // TODO: Set packet to NULL?
             return -1; // Timeout occured.
         } else {
             // Some other error occured.
@@ -228,21 +229,21 @@ int Server::sendFile(char* filename) {
         closest_timeout = TIMEOUT;//double_timeout;
         closest_packet = NULL;
         for (Packet* packet : this->window) {
-            timersub(&(packet->timeout), &current_time, &packet_timeout);
+            timersub(&(packet->timeout_time), &current_time, &packet_timeout);
             if (timercmp(&packet_timeout, &closest_timeout, <)) {
                 closest_timeout = packet_timeout;
                 closest_packet = packet;
             }
         }
-        if (closest_timeout.tv_sec <= 0) {
-            fprintf(stderr, "Zero closest timeout... printing window.\n");
-            for (Packet* packet: this->window) {
-                fprintf(stderr, "    seqno: %d, timeout: %li:%li, current_time: %li:%li\n", 
-                    packet->header.seqno, packet->timeout.tv_sec, packet->timeout.tv_usec,
-                    current_time.tv_sec, current_time.tv_usec);
-            }
-        }
-        fprintf(stderr, "closest timeout: %li:%li\n", closest_timeout.tv_sec, closest_timeout.tv_usec);
+        // if (closest_timeout.tv_sec <= 0) {
+        //     fprintf(stderr, "Zero closest timeout... printing window.\n");
+        //     for (Packet* packet: this->window) {
+        //         fprintf(stderr, "    seqno: %d, timeout: %li:%li, current_time: %li:%li\n", 
+        //             packet->header.seqno, packet->timeout_time.tv_sec, packet->timeout_time.tv_usec,
+        //             current_time.tv_sec, current_time.tv_usec);
+        //     }
+        // }
+        // fprintf(stderr, "closest timeout: %li:%li\n", closest_timeout.tv_sec, closest_timeout.tv_usec);
 
         // Wait for an ACK, or a timeout. Retransmit on timeout.
         if (!this->window.empty()) {

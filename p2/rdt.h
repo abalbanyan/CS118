@@ -25,7 +25,7 @@ const int INITIAL_WINDOW = 5120; // Just the default.
 
 const int FAST_RETRANSMIT_THRESH = 3;
 const struct timeval TIMEOUT = {
-    5000,     /* tv_sec  */
+    5,     /* tv_sec  */
     500000 /* tv_usec */
 };
 const struct timeval NOTIMEOUT = {0,0};
@@ -103,6 +103,9 @@ public:
         this->header = packet->header;
         this->acked = packet->acked;
         this->timeout = packet->timeout;
+
+        gettimeofday(&(this->timeout), NULL);
+        timeradd(&TIMEOUT, &(this->timeout), &(this->timeout));
     }
 
     Packet() {}

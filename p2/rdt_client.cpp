@@ -24,50 +24,32 @@ Client::Client(char* serverhostname, char* port, char* filename) {
     Packet* rcv_packet = NULL;
     int receivestatus;
     uint16_t nextseqno;
-    uint16_t filenameackno;
 
     // Send SYN with initial seqno.
     srand(time(NULL));
     nextseqno = rand() % MAX_SEQNO; // Set initial sequence number randomly.
     snd_packet = Packet(SYN, nextseqno, 0);
-    nextseqno = (nextseqno + 1) % MAX_SEQNO;
+
     do {
-        this->sendPacket(snd_packet);
-        // Wait for SYNACK.
-        receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT);
-        if (receivestatus > 0 
-                && ((rcv_packet->header).flags != SYNACK || rcv_packet->header.ackno != nextseqno)) {
-            fprintf(stderr, "Error: Expected SYNACK, received something else.\n");
-            exit(1);
-        }
-        if (receivestatus > 0) {
-            filenameackno = (rcv_packet->header.seqno + 1) % MAX_SEQNO;
-        }
+        if (rcv_packet != NULL)
+            delete rcv_packet;
+        this->sendPacket(snd_packet); // Send SYN.
+        receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT); // Wait for SYNACK.
+    } while (receivestatus <= 0 || (rcv_packet->header).flags != SYNACK || rcv_packet->header.ackno != snd_packet.header.seqno);
+
+    uint16_t filenameseqno = (nextseqno + 1) % MAX_SEQNO;
+
+    // Send ACK for SYNACK, include filename.
+    snd_packet = Packet(ACK, filenameseqno, rcv_packet->header.seqno, (uint8_t*) filename, strlen(filename) + 1);
+    this->rcv_base = (rcv_packet->header.seqno + 1) % MAX_SEQNO;
+    do {
         delete rcv_packet;
-    } while (receivestatus <= 0);
-    
-    fprintf(stdout, "Connected to server!\n");
+        this->sendPacket(snd_packet); // Send the ACK with filename.
+        receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT); // Wait for first ACK of filename.
+    } while (receivestatus <= 0 || rcv_packet->header.flags != ACK || rcv_packet->header.ackno != filenameseqno);
+
     // Begin accepting requested file.
     ofstream outputfile("received.data");
-
-    // Send ACK with filename.
-    snd_packet = Packet(ACK, nextseqno, filenameackno, (uint8_t*) filename, strlen(filename) + 1);
-    do {
-        this->sendPacket(snd_packet);
-        // Wait for first chunk (which also contains filename ACK).
-        receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT);
-        if (receivestatus <= 0) {
-            delete rcv_packet;
-        } else if (rcv_packet->header.flags & ACK) {
-            break; // Start accepting the rest of the file.
-        } else {
-            fprintf(stderr, "Error receiving ACK for filename.\n");
-            exit(1);
-        }
-    } while (receivestatus <= 0);
-
-    this->rcv_base = filenameackno;
-
     // Accept the rest of the file.
     while(1) {
         if (rcv_packet == NULL) {
@@ -103,6 +85,7 @@ Client::Client(char* serverhostname, char* port, char* filename) {
                 this->received_packets.insert(rcv_packet->header.seqno);
             }
             // ACK the received packet. 
+            fprintf(stderr, "ACKing packet.\n");
             Packet ack = Packet(ACK, 0, rcv_packet->header.seqno);
             this->sendPacket(ack);
 

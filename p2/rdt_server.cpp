@@ -38,23 +38,20 @@ Server::Server(char* src_port) {
     // Send SYNACK with random initial seqno, and wait for ACK.
     srand(time(NULL));
     this->nextseqno = rand() % MAX_SEQNO; // Set initial sequence number randomly.
-    snd_packet = Packet(SYNACK, this->nextseqno, rcv_packet->header.seqno + 1);
+    snd_packet = Packet(SYNACK, this->nextseqno, rcv_packet->header.seqno);
     this->nextseqno = (this->nextseqno + 1) % MAX_SEQNO;
-
-    delete rcv_packet;
-
     do {
+        delete rcv_packet;
         this->sendPacket(snd_packet);
         receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT);
-    } while (receivestatus <= 0);
+    } while (receivestatus <= 0 || (rcv_packet->header).flags != ACK || rcv_packet->header.ackno != snd_packet.header.seqno);
 
-    if ((rcv_packet->header).flags != ACK || rcv_packet->payload == NULL) {
-        fprintf(stderr, "Error receiving ACK. No filename included or not ACK.\n");
+    this->filename_ackno = rcv_packet->header.seqno; // Record filename SEQNO for ACKing.
+
+    if (rcv_packet->payload == NULL) {
+        fprintf(stderr, "Error receiving ACK. No filename included.\n");
         exit(1);
     }
-    this->filename_ackno = snd_packet.header.seqno;
-
-    fprintf(stdout, "Connected to client!\n");
 
     // Connection has been established. Send requested file to client.
     if (this->sendFile((char*) rcv_packet->payload) <= 0) {
@@ -109,8 +106,9 @@ int Server::sendPacket(Packet &packet, bool retransmission) {
     }
 
     // Reset timeout on packet.
-    gettimeofday(&(packet.timeout), NULL);
-    timeradd(&TIMEOUT, &(packet.timeout), &(packet.timeout));
+    struct timeval timeofday;
+    gettimeofday(&timeofday, NULL);
+    timeradd(&TIMEOUT, &timeofday, &(packet.timeout));
 
     // Print status message.
     const char* type = (retransmission)? "Retransmission" : (packet.header.flags & SYN)? "SYN" : (packet.header.flags & FIN)? "FIN" : "";
@@ -225,9 +223,10 @@ int Server::sendFile(char* filename) {
             done_reading = (done_reading)? done_reading : this->sendFileChunk();
         }
 
-        // Find closest timeout time.
+        // Find closest timeout time in the window.
         gettimeofday(&current_time, NULL);
-        closest_timeout = double_timeout;
+        closest_timeout = TIMEOUT;//double_timeout;
+        closest_packet = NULL;
         for (Packet* packet : this->window) {
             timersub(&(packet->timeout), &current_time, &packet_timeout);
             if (timercmp(&packet_timeout, &closest_timeout, <)) {
@@ -235,6 +234,15 @@ int Server::sendFile(char* filename) {
                 closest_packet = packet;
             }
         }
+        if (closest_timeout.tv_sec <= 0) {
+            fprintf(stderr, "Zero closest timeout... printing window.\n");
+            for (Packet* packet: this->window) {
+                fprintf(stderr, "    seqno: %d, timeout: %li:%li, current_time: %li:%li\n", 
+                    packet->header.seqno, packet->timeout.tv_sec, packet->timeout.tv_usec,
+                    current_time.tv_sec, current_time.tv_usec);
+            }
+        }
+        fprintf(stderr, "closest timeout: %li:%li\n", closest_timeout.tv_sec, closest_timeout.tv_usec);
 
         // Wait for an ACK, or a timeout. Retransmit on timeout.
         if (!this->window.empty()) {

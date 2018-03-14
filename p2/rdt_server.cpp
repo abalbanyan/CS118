@@ -11,6 +11,7 @@ Server::Server(char* src_port) {
     // Fill in address info.
     memset((char*) &(this->serverinfo), 0, sizeof(this->serverinfo));
 
+
     this->serverinfo.sin_family = AF_INET;
     this->serverinfo.sin_port = htons(atoi(src_port));
 
@@ -169,6 +170,7 @@ bool Server::sendFileChunk() {
 
     bool done_reading = false;
     ssize_t bytestoread = this->filesize - this->file.tellg();
+
     int flag = (this->filename_acked)? 0 : ACK;
     int ackno = (this->filename_acked)? 0 : this->filename_ackno;
 
@@ -182,6 +184,7 @@ bool Server::sendFileChunk() {
 
     this->file.read((char*) buffer, bytestoread);
     Packet* packet = new Packet(flag, this->nextseqno, ackno, buffer, bytestoread);
+
     this->sendPacket(*packet); // Send as soon as it is made available.
     if (this->window.empty()) {
         this->baseseqno = packet->header.seqno;
@@ -190,6 +193,7 @@ bool Server::sendFileChunk() {
 
     this->nextseqno = (this->nextseqno + bytestoread + (INCHEADER? HEADER_SIZE : 0)) % MAX_SEQNO;
 
+    delete buffer;
     return done_reading;
 }
 
@@ -229,21 +233,14 @@ int Server::sendFile(char* filename) {
         closest_timeout = TIMEOUT;//double_timeout;
         closest_packet = NULL;
         for (Packet* packet : this->window) {
-            timersub(&(packet->timeout_time), &current_time, &packet_timeout);
-            if (timercmp(&packet_timeout, &closest_timeout, <)) {
-                closest_timeout = packet_timeout;
-                closest_packet = packet;
+            if (!packet->acked) {
+                timersub(&(packet->timeout_time), &current_time, &packet_timeout);
+                if (timercmp(&packet_timeout, &closest_timeout, <)) {
+                    closest_timeout = packet_timeout;
+                    closest_packet = packet;
+                }
             }
         }
-        // if (closest_timeout.tv_sec <= 0) {
-        //     fprintf(stderr, "Zero closest timeout... printing window.\n");
-        //     for (Packet* packet: this->window) {
-        //         fprintf(stderr, "    seqno: %d, timeout: %li:%li, current_time: %li:%li\n", 
-        //             packet->header.seqno, packet->timeout_time.tv_sec, packet->timeout_time.tv_usec,
-        //             current_time.tv_sec, current_time.tv_usec);
-        //     }
-        // }
-        // fprintf(stderr, "closest timeout: %li:%li\n", closest_timeout.tv_sec, closest_timeout.tv_usec);
 
         // Wait for an ACK, or a timeout. Retransmit on timeout.
         if (!this->window.empty()) {
@@ -259,17 +256,22 @@ int Server::sendFile(char* filename) {
                     }
                 }
                 // If ACKno == baseseqno, delete all ACKed packets from beginning of window to first unACKed packet, and update baseseqno.
-                if (this->baseseqno == rcv_packet->header.ackno) {
+                bool removed_one;
+                do {
+                    removed_one = false;
                     for (vector<Packet*>::iterator it = this->window.begin(); it != this->window.end();) {
-                        if ((*it)->acked) {
+                        if ((*it)->acked && (*it)->header.seqno == this->baseseqno) {
+                            this->baseseqno = (this->baseseqno + (*it)->packet_size - (INCHEADER? 0 : HEADER_SIZE)) % MAX_SEQNO;
                             delete *it;
                             this->window.erase(it);
-                        } else {
-                            this->baseseqno = (*it)->header.seqno;
+                            removed_one = true;
                             break;
+                        } else {
+                            ++it;
                         }
                     }
-                }
+                } while (removed_one);
+
                 this->filename_acked = true;
             }
         } else if (done_reading) {

@@ -25,7 +25,7 @@ const int INITIAL_WINDOW = 5120; // Just the default.
 
 const int FAST_RETRANSMIT_THRESH = 3;
 const struct timeval TIMEOUT = {
-    5,     /* tv_sec  */
+    0,     /* tv_sec  */
     500000 /* tv_usec */
 };
 const struct timeval NOTIMEOUT = {0,0};
@@ -124,7 +124,7 @@ public:
     int sockfd;
     struct sockaddr_in serverinfo;
 
-    set<uint16_t> received_packets; // Used to store seqnos received so we can track duplicates.
+    vector<uint16_t> last_seqnos; // Stores the sequence numbers of the last MAX_SEQNO/MAX_PKT_SIZE_SANS_HEADER packets we have seen. Used to check for duplicate packets.
     vector<Packet*> rcv_window; // Store received packets in a buffer.
     uint16_t rcv_base; // Base seqno in packet_buffer.
     
@@ -140,6 +140,9 @@ public:
     int receivePacket(Packet* &packet, bool blocking = true, struct timeval timeout = NOTIMEOUT);
 
     void writePacketToFile(ofstream &file, Packet* &packet);
+
+    // Returns true if the packet's sequence number has been seen in the last MAX_SEQNO/MAX_PKT_SIZE_SANS_HEADER packets.
+    bool isDuplicatePacket(Packet* &packet);
 };
 
 class Server {

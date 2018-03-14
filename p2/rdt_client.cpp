@@ -48,16 +48,15 @@ Client::Client(char* serverhostname, char* port, char* filename) {
     } while (receivestatus <= 0 || rcv_packet->header.flags != ACK || rcv_packet->header.ackno != filenameseqno);
 
     // Begin accepting requested file.
-    ofstream outputfile("received.data");
+    ofstream outputfile("received.data", ios::trunc | ios::out | ios::binary);
     // Accept the rest of the file.
     while(1) {
         if (rcv_packet == NULL) {
             receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT);
         } else if (!(rcv_packet->header.flags & FIN)) {
             // Normal packet.
-            if (this->received_packets.find(rcv_packet->header.seqno) == this->received_packets.end()) {
+            if (!this->isDuplicatePacket(rcv_packet)) {
                 // This block of code is here to write out-of-order packets in the correct order to file.
-                // TODO: There is probably a bug here - corruption in received file sometimes when packet loss is on.
                 if (rcv_packet->header.seqno != this->rcv_base) {
                     this->rcv_window.push_back(new Packet(rcv_packet)); // Add to buffer.
                 } else {
@@ -82,7 +81,6 @@ Client::Client(char* serverhostname, char* port, char* filename) {
                         }
                     } while (removed_one);
                 }
-                this->received_packets.insert(rcv_packet->header.seqno);
             }
             // ACK the received packet. 
             Packet ack = Packet(ACK, 0, rcv_packet->header.seqno);
@@ -188,4 +186,18 @@ void Client::writePacketToFile(ofstream &file, Packet* &packet) {
     for (int i = 0; i < (packet->packet_size - HEADER_SIZE); i++) {
         file << packet->payload[i];
     }
+}
+
+bool Client::isDuplicatePacket(Packet* &packet) {
+    for (uint16_t seqno : this->last_seqnos) {
+        if (packet->header.seqno == seqno) {
+            return true;
+        }
+    }
+    // Not a duplicate. Add to last_seqnos.
+    this->last_seqnos.push_back(packet->header.seqno);
+    if (this->last_seqnos.size() > MAX_SEQNO/MAX_PKT_SIZE_SANS_HEADER) {
+        this->last_seqnos.erase(this->last_seqnos.begin());
+    }
+    return false;
 }

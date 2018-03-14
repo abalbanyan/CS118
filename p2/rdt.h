@@ -98,7 +98,10 @@ public:
         this->packet_size = packet->packet_size;
         if (packet->payload != NULL) {
             this->payload = new uint8_t[packet->packet_size - HEADER_SIZE];
-            memcpy(this->payload, payload, this->packet_size - HEADER_SIZE);
+            memcpy(this->payload, packet->payload, this->packet_size - HEADER_SIZE);
+            // for (int i = 0; i < packet->packet_size - HEADER_SIZE; i++) {
+            //     this->payload[i] = packet->payload[i];
+            // }
         }
         this->header = packet->header;
         this->acked = packet->acked;

@@ -95,7 +95,7 @@ int Server::sendPacket(Packet &packet, bool retransmission) {
 
     // Copy payload into buffer if it exists.
     if (packet.payload != NULL && packet.packet_size > HEADER_SIZE) {
-        memcpy(&packet_buffer[HEADER_SIZE], packet.payload, packet.packet_size);
+        memcpy(&packet_buffer[HEADER_SIZE], packet.payload, packet.packet_size - HEADER_SIZE);
     }
 
     // Send the packet to the client.
@@ -246,7 +246,9 @@ int Server::sendFile(char* filename) {
         if (!this->window.empty()) {
             if (this->receivePacket(rcv_packet, true, closest_timeout) == -1) {
                 // Timeout occured. Retransmit the packet.
-                this->sendPacket(*closest_packet, true);
+                if (closest_packet != NULL) {
+                    this->sendPacket(*closest_packet, true);
+                }
             } else {
                 // ACK received.
                 // Mark appropriate packet as ACKed.

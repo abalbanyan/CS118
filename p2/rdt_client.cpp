@@ -52,7 +52,6 @@ Client::Client(char* serverhostname, char* port, char* filename) {
     // Accept the rest of the file.
     while(1) {
         if (rcv_packet == NULL) {
-            fprintf(stderr, "============PACKET NULL!============\n");
             receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT);
         } else if (!(rcv_packet->header.flags & FIN)) {
             // Normal packet.
@@ -86,7 +85,6 @@ Client::Client(char* serverhostname, char* port, char* filename) {
                 this->received_packets.insert(rcv_packet->header.seqno);
             }
             // ACK the received packet. 
-            fprintf(stderr, "ACKing packet.\n");
             Packet ack = Packet(ACK, 0, rcv_packet->header.seqno);
             this->sendPacket(ack);
 
@@ -97,12 +95,14 @@ Client::Client(char* serverhostname, char* port, char* filename) {
             // TODO: Fix this if we need to include payload in the FIN.
             // TODO: This seems to freeze sometimes...
 
-            snd_packet = Packet(ACK);
+            snd_packet = Packet(ACK, 0, rcv_packet->header.seqno);
             this->sendPacket(snd_packet);
-            snd_packet = Packet(FIN);
+            snd_packet = Packet(FIN, (nextseqno + strlen(filename) + 1) % MAX_SEQNO, 0);
             this->sendPacket(snd_packet);
-            
-            this->receivePacket(rcv_packet, true, TIMEOUT); // Can just time out.
+
+            struct timeval timedwaittimeout;
+            timeradd(&TIMEOUT, &TIMEOUT, &timedwaittimeout);           
+            this->receivePacket(rcv_packet, true, timedwaittimeout); // Can just time out.
 
             delete rcv_packet; rcv_packet = NULL;
             outputfile.close();

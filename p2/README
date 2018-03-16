@@ -1,0 +1,16 @@
+CS118 - PROJECT #2 README
+Abdullah Albanyan - 304479543
+Alvin Corhodzic - 804415450
+Demo: Zhaowei 03/21 16:30-16:45
+
+Workload divided as follows:
+
+Abdullah
+  - Initial code set up + sending SYN and ACK messages between server and client
+  - Timeout functionality on pakcets
+  - Packet loss handling
+
+Alvin
+  - Large file transmission functionality
+  - Fixed bugs (data corruption issue, timeouts ending early, infinite loops)
+  - Report/Demo Presentation

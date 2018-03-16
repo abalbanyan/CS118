@@ -39,6 +39,7 @@ const int SYN = 2;   // 0b00000010;
 const int ACK = 16;  // 0b00010000;
 const int CWR = 128; // 0b10000000;
 const int SYNACK = ACK | SYN;
+const int FINACK = ACK | FIN;
 
 struct PacketHeader {
     // uint16_t src_port = 0;

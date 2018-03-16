@@ -89,20 +89,22 @@ Client::Client(char* serverhostname, char* port, char* filename) {
             delete rcv_packet; rcv_packet = NULL;
 
         } else {
-            // Server is trying to close connection. Acknowledge the FIN.
-            // TODO: Fix this if we need to include payload in the FIN.
-            // TODO: This seems to freeze sometimes...
-
-            snd_packet = Packet(ACK, 0, rcv_packet->header.seqno);
-            this->sendPacket(snd_packet);
-            snd_packet = Packet(FIN, (nextseqno + strlen(filename) + 1) % MAX_SEQNO, 0);
+            // Server is trying to close connection. Respond with FINACK.
+            uint16_t finackseqno = (filenameseqno + strlen(filename) + 1) % MAX_SEQNO;
+            snd_packet = Packet(FINACK, finackseqno, rcv_packet->header.seqno);
             this->sendPacket(snd_packet);
 
+            // Wait for ACK.
             struct timeval timedwaittimeout;
-            timeradd(&TIMEOUT, &TIMEOUT, &timedwaittimeout);           
-            this->receivePacket(rcv_packet, true, timedwaittimeout); // Can just time out.
+            timeradd(&TIMEOUT, &TIMEOUT, &timedwaittimeout);
+            while (this->receivePacket(rcv_packet, true, timedwaittimeout) > 0) {
+                if (rcv_packet->header.flags != ACK)
+                    break;
+            }
+            if (rcv_packet != NULL) {
+                delete rcv_packet; rcv_packet = NULL;
+            }
 
-            delete rcv_packet; rcv_packet = NULL;
             outputfile.close();
             close(sockfd);
             exit(0);

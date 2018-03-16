@@ -61,27 +61,18 @@ Server::Server(char* src_port) {
     }
     delete rcv_packet; rcv_packet = NULL;
 
-    // TODO: Not sure if we're supposed to send a FIN here or in sendFileChunk when the last chunk is sent.
+    // Send FIN, then wait for FINACK.
     snd_packet = Packet(FIN, this->nextseqno);
-    this->sendPacket(snd_packet);
-    // Finished sending file. Wait for FINACK then close connection (we close anyway if it takes too long).
-    bool fin_ackreceived = false;
-    bool fin_finreceived = false;
     do {
-        receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT);
-        if (receivestatus > 0 && rcv_packet->header.flags & FIN)
-            fin_finreceived = true;
-        if (receivestatus > 0 && rcv_packet->header.flags & ACK)
-            fin_ackreceived = true;
-        delete rcv_packet; rcv_packet = NULL;
-    } while (receivestatus > 0 && ( !fin_ackreceived || !fin_finreceived ));
-
-    // Send acknowledgement of FIN (if we didn't just timeout).
-    if (receivestatus > 0) {
-        snd_packet = Packet(ACK);
+        if (rcv_packet == NULL) 
+            delete rcv_packet;
         this->sendPacket(snd_packet);
-    }
-    // Close connection.
+    } while (this->receivePacket(rcv_packet, true, TIMEOUT) <= 0 || rcv_packet->header.flags != FINACK);
+
+    // Send ACK for FINACK, then close connection.
+    snd_packet = Packet(ACK, this->nextseqno, rcv_packet->header.seqno);
+    this->sendPacket(snd_packet);
+
     fprintf(stdout, "Closing connection. Goodbye.\n");
     close(this->sockfd);
     exit(0);

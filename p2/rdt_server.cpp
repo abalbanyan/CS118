@@ -47,6 +47,7 @@ Server::Server(char* src_port) {
         receivestatus = this->receivePacket(rcv_packet, true, TIMEOUT);
     } while (receivestatus <= 0 || (rcv_packet->header).flags != ACK || rcv_packet->header.ackno != snd_packet.header.seqno);
 
+    this->lastackno = rcv_packet->header.ackno;
     this->filename_ackno = rcv_packet->header.seqno; // Record filename SEQNO for ACKing.
 
     if (rcv_packet->payload == NULL) {
@@ -104,7 +105,7 @@ int Server::sendPacket(Packet &packet, bool retransmission) {
 
     // Print status message.
     const char* type = (retransmission)? "Retransmission" : (packet.header.flags & SYN)? "SYN" : (packet.header.flags & FIN)? "FIN" : "";
-    fprintf(stdout, "Sending packet %d %d %s\n", packet.header.seqno, this->cwnd * MAX_PKT_SIZE, type);
+    fprintf(stdout, "Sending packet %d %d %d %s\n", packet.header.seqno, this->cwnd, this->ssthresh, type);
 
     delete packet_buffer;
     return (bytessent > 0) ? bytessent : 0;
@@ -214,8 +215,12 @@ int Server::sendFile(char* filename) {
     // Event loop.
     // Each loop, window is filled, and either one packet is received, or a timeout occurs.
     while (1) {
+        if (this->congestionstate == SLOW_START && this->cwnd >= this->ssthresh) {
+            this->congestionstate = CONGESTION_AVOIDANCE;
+        }
+
         // Fill cwnd.
-        while (!done_reading && this->window.size() < this->cwnd) {
+        while (!done_reading && this->window.size() < (this->cwnd / MAX_PKT_SIZE)) {
             done_reading = (done_reading)? done_reading : this->sendFileChunk();
         }
 
@@ -236,12 +241,53 @@ int Server::sendFile(char* filename) {
         // Wait for an ACK, or a timeout. Retransmit on timeout.
         if (!this->window.empty()) {
             if (this->receivePacket(rcv_packet, true, closest_timeout) == -1) {
-                // Timeout occured. Retransmit the packet.
+                // Timeout occured.
+                this->ssthresh = this->cwnd / 2;
+                this->cwnd = MAX_PKT_SIZE;
+                this->dupacks = 0;
+                this->congestionstate = SLOW_START;
+
+                // Retransmit the missing packet.
                 if (closest_packet != NULL) {
                     this->sendPacket(*closest_packet, true);
                 }
+            } else if (rcv_packet->header.ackno == this->lastackno) {
+                // Duplicate ACK.
+                switch (this->congestionstate) {
+                    case SLOW_START:
+                    case CONGESTION_AVOIDANCE:
+                        this->dupacks++;
+                        if (this->dupacks == 3) {
+                            this->ssthresh = this->cwnd / 2;
+                            this->cwnd = this->ssthresh + 3 * MAX_PKT_SIZE;
+    
+                            // Fast retransmit unACKed packets.
+                            for (Packet* packet : this->window) {
+                                this->sendPacket(*packet, true);
+                            }
+                        }
+                        this->congestionstate = FAST_RECOVERY;
+                        break;
+                    case FAST_RECOVERY:
+                        this->cwnd += MAX_PKT_SIZE;
+                        break;
+                }
             } else {
-                // ACK received.
+                // New ACK received.
+                this->dupacks = 0;
+                switch (this->congestionstate) {
+                    case SLOW_START:
+                        this->cwnd += MAX_PKT_SIZE;
+                        break;
+                    case CONGESTION_AVOIDANCE:
+                        this->cwnd += (MAX_PKT_SIZE / this->cwnd);
+                        break;
+                    case FAST_RECOVERY:
+                        this->cwnd = this->ssthresh;
+                        this->congestionstate = CONGESTION_AVOIDANCE;
+                        break;
+                }
+
                 // Mark appropriate packet as ACKed.
                 for (Packet* packet : this->window) {
                     if (packet->header.seqno == rcv_packet->header.ackno) {

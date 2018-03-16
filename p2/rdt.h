@@ -21,9 +21,11 @@ using namespace std;
 // Define constants (bytes).
 const int MAX_PKT_SIZE = 1024; // Including headers.
 const int MAX_SEQNO = 30720;
-const int INITIAL_WINDOW = 5120; // Just the default.
+const int INITIAL_WINDOW = 1024; // Just the default.
 
 const int FAST_RETRANSMIT_THRESH = 3;
+const int INITIAL_SSTHRESH = 15360;
+
 const struct timeval TIMEOUT = {
     0,     /* tv_sec  */
     500000 /* tv_usec */
@@ -40,6 +42,10 @@ const int ACK = 16;  // 0b00010000;
 const int CWR = 128; // 0b10000000;
 const int SYNACK = ACK | SYN;
 const int FINACK = ACK | FIN;
+
+const int SLOW_START = 0;
+const int CONGESTION_AVOIDANCE = 1;
+const int FAST_RECOVERY = 2;
 
 struct PacketHeader {
     // uint16_t src_port = 0;
@@ -159,11 +165,14 @@ public:
     ssize_t filesize;
 
     vector<Packet*> window; // Packets ready to be sent (limited to size of window).
-    uint16_t cwnd = INITIAL_WINDOW/MAX_PKT_SIZE; // Number of packets allowed in current window.
+    uint32_t cwnd = INITIAL_WINDOW; // Number of packets allowed in current window.
+    uint32_t ssthresh = INITIAL_SSTHRESH;
+    
     uint16_t baseseqno; // The seqno of the oldest packet which has not been ACKed (bytes).
     uint16_t nextseqno; // The seqno of the next sendable packet (bytes).
-    uint16_t lastackno; // The last ackno we have received. Remember SR uses cumulative ACKing, so baseseq should be set equal to lastack.
-    int dupacks; // Counter for number of duplicate ACKs we have received (retransmit all unACKed packets on 3).
+    uint16_t lastackno; // The last ackno we have received.
+    int dupacks = 0; // Counter for number of duplicate ACKs we have received (retransmit all unACKed packets on 3).
+    int congestionstate = SLOW_START;
 
     bool filename_acked = false; // Has the filename been ACKed yet?
     int filename_ackno; // ackno of filename ACK.
